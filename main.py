@@ -12,6 +12,7 @@ from PIL import Image
 from io import BytesIO
 from datetime import datetime
 import time
+from discord import Button, ButtonStyle
 
 token = os.environ['TOKEN']
 db_user = os.environ['MONGO_USER']
@@ -82,29 +83,31 @@ async def on_ready():
 
 
 @client.event
-async def on_reaction_add(reaction, user):
+# async def on_reaction_add(reaction, user):
+async def on_button_click(interaction, button):
+    user = interaction.author
     if not user.bot:
-        if reaction.message in encounters:
-            capture_rate, attempts, id = encounters[reaction.message]
+        message = interaction.message
+        if message in encounters:
+            capture_rate, attempts, id = encounters[message]
             if user not in attempts:
                 attempts.add(user)
                 roll = random.randint(0, 255)
                 if roll < capture_rate:
 
-                    await reaction.message.reply(f"{user.name} caught pokemon")
-                    await reaction.remove(user)
-                    encounters.pop(reaction.message)
+                    await interaction.respond(f"{user.name} caught pokemon")
+                    encounters.pop(message)
                     player_collection().update_one({"discord_id": user.id}, {"$push": {"owned_pokemon": id}})
 
 
                 else:
-                    await reaction.message.reply(f"you are so unlucky {roll}")
+                    await interaction.respond(f"you are so unlucky {roll}", delete_after=10, hidden=True)
 
             else:
-                await reaction.message.reply("you already tried to catch this pokemon")
+                await interaction.respond("you already tried to catch this pokemon",  delete_after=10, hidden=True)
 
-        # else:
-        #    await reaction.message.reply(":turtle: too late, be quicker next time :turtle:")
+        else:
+           await interaction.respond(":turtle: too late, be quicker next time :turtle:",  delete_after=10, hidden=True)
 
 
 @client.command()
@@ -129,9 +132,18 @@ async def trade_command(ctx, user: discord.Member, *message):
         },
         'closed': False
     }
-    save_trade(ctx.message.id, trade)
     embed = await trade_embed(trade)
-    await ctx.send(embed=embed)
+    response = await ctx.send(embed=embed, components=[[
+        Button(label="Accept" ,
+               custom_id="confirm_trade",
+               style=ButtonStyle.green),
+        Button(label="Reject" ,
+               custom_id="reject_trade",
+               style=ButtonStyle.red)
+    ]])
+    trade['messageId'] = response.id
+    save_trade(response.id, trade)
+    await ctx.message.delete()
 
 
 async def trade_embed(trade):
@@ -155,30 +167,34 @@ async def encounter(ctx, message=""):
     if data:
 
         # assume 'image_url' is the URL of the image you want to add to the embed
-        response = requests.get(data['sprites']['front_default'])
-        image = Image.open(BytesIO(response.content))
-
-        # resize the image to the desired size
-        image = image.resize((1024, 1024))
-
-        # create a Discord file object from the resized image
-        with BytesIO() as image_binary:
-            image.save(image_binary, 'PNG')
-            image_binary.seek(0)
-            file = discord.File(fp=image_binary, filename='image.png')
-
-        # create the embed and add the image + name
+        # response = requests.get(data['sprites']['front_default'])
+        # image = Image.open(BytesIO(response.content))
+        #
+        # # resize the image to the desired size
+        # image = image.resize((1024, 1024))
+        #
+        # # create a Discord file object from the resized image
+        # with BytesIO() as image_binary:
+        #     image.save(image_binary, 'PNG')
+        #     image_binary.seek(0)
+        #     file = discord.File(fp=image_binary, filename='image.png')
+        #
+        # # create the embed and add the image + name
         embed = discord.Embed(title=data["name"].capitalize())
-        embed.set_image(url='attachment://image.png')
+        # embed.set_image(url='attachment://image.png')
+        embed.set_image(url=data['sprites']['front_default'])
 
         capture_rate = get_capture_rate(data['species']['url'])
         embed.add_field(name='capture_rate', value=capture_rate)
         embed.set_footer(text=data['id'])
         message = await ctx.send(encounter_animation_url)
         time.sleep(2)
-        await message.edit(content=None, attachments=[file], embed=embed)
-
-        await message.add_reaction(":pokeball:1118548894419275977")
+        # await message.edit(content=None, attachments=[file], embed=embed)
+        await message.edit(content=None, embed=embed, components=[[
+            Button(emoji=client.get_emoji(1118548894419275977),
+                   custom_id="pokeball",
+                   style=ButtonStyle.grey)
+        ]])
 
         encounters[message] = (capture_rate, set(), int(id))
 
@@ -270,11 +286,11 @@ async def inventory(ctx, message=''):
 
 
 def get_trade(message_id):
-    return db.get_collection("trades").find_one({"message_id": message_id})
+    return db.get_collection("trades").find_one({"messageId": message_id})
 
 
 def save_trade(message_id, trade):
-    db.get_collection("trades").update_one({"message_id": message_id}, {"$set": trade}, upsert=True)
+    db.get_collection("trades").update_one({"messageId": message_id}, {"$set": trade}, upsert=True)
 
 
 def player_collection():
@@ -343,13 +359,15 @@ async def on_message(message):
     if message.reference is not None:
         trade = get_trade(message.reference.message_id)
         if trade:
-            if message.author.id in trade['offers']:
+            if str(message.author.id) in trade['offers']:
                 for pokemon_id in message.content.split():
-                    trade['offers'][message.author.id].append(pokemon_id)
-                save_trade(message.id,trade)
-                embed=trade_embed(trade)
-                await client.fetch_channel(message.reference.channel_id).fetch_message(message.reference.message_id).edit(embed=embed)
-
+                    trade['offers'][str(message.author.id)].append(pokemon_id)
+                save_trade(message.reference.message_id, trade)
+                embed = await trade_embed(trade)
+                channel = await client.fetch_channel(message.reference.channel_id)
+                trade_message = await channel.fetch_message(message.reference.message_id)
+                await message.delete()
+                await trade_message.edit(embed=embed)
 
     await client.process_commands(message)
 
