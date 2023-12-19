@@ -300,6 +300,56 @@ def player_collection():
 def get_emoji(id):
     emoji = db.get_collection("emojis").find_one({"pokemon_id": int(id)})
     return emoji["emoji"] if emoji else ":interrobang:"
+# minihry
+@client.command(name="guess", aliases =["g"])
+async def guess(ctx):
+    number = random.randint(1, 10)
+    await ctx.send("Guess a number between 1 and 10.")
+
+    def check(msg):
+        return msg.author == ctx.author and msg.channel == ctx.channel and int(msg.content) in range(1, 11)
+
+    guess = await client.wait_for("message", check=check)
+
+    if int(guess.content) == number:
+        await ctx.send("Congratulations, you guessed it!")
+        await ctx.send('You will get a reward, the reward will be a pokemon 🛠️we working on it🛠️')
+    else:
+        await ctx.send(f"Wrong guess! The correct number was {number}.")
+
+@client.command(name='ig')
+async def id_guesser(ctx):
+    # pokemon_id = random.randint(1, 2)
+    pokemon_id = random.randint(1, 100)
+    response = requests.get(f'https://pokeapi.co/api/v2/pokemon/{pokemon_id}')
+    pokemon_data = response.json()
+    pokemon_name = pokemon_data['name']
+    pokemon_image = pokemon_data['sprites']['front_default']
+
+    embed = discord.Embed(title=pokemon_name, color=0x109319)
+    embed.set_image(url=pokemon_image)
+    await ctx.send(embed=embed)
+
+    def check(m):
+        return m.author == ctx.author and m.content.isdigit()
+
+    await ctx.send('Guess the Pokemon ID from 1 to 100:')
+    guess = await client.wait_for('message', check=check)
+    if int(guess.content) == pokemon_id:
+        await ctx.send('You are right!')
+
+        await ctx.send('You will get a reward, the reward will be a pokemon 🛠️we working on it🛠️')
+
+
+    else:
+        await ctx.send(f'Oops. It was actually {pokemon_id}.')
+
+
+
+    # discord.Embed(title=data["name"].capitalize(),
+    #               url="https://assets.pokemon.com/assets/cms2/img/pokedex/full/001.png",
+    #               description=species.replace('\n', ' '),
+    #               color=0x27b030)
 
 
 @client.command()
@@ -360,16 +410,29 @@ async def on_message(message):
         trade = get_trade(message.reference.message_id)
         if trade:
             if str(message.author.id) in trade['offers']:
-                for pokemon_id in message.content.split():
-                    trade['offers'][str(message.author.id)].append(pokemon_id)
-                save_trade(message.reference.message_id, trade)
-                embed = await trade_embed(trade)
-                channel = await client.fetch_channel(message.reference.channel_id)
-                trade_message = await channel.fetch_message(message.reference.message_id)
-                await message.delete()
-                await trade_message.edit(embed=embed)
+                pokemon_ids = message.content.split()
+                if user_has_pokemon(message.author.id, pokemon_ids):
+                    for pokemon_id in pokemon_ids:
+                        trade['offers'][str(message.author.id)].append(pokemon_id)
+                    save_trade(message.reference.message_id, trade)
+                    embed = await trade_embed(trade)
+                    channel = await client.fetch_channel(message.reference.channel_id)
+                    trade_message = await channel.fetch_message(message.reference.message_id)
+                    await trade_message.edit(embed=embed)
+                else:
+                    await message.reply("you don't have this pokemon :cry:", ephemeral=True, mention_author=True)
+            else:
+                await message.reply("you aren't a part of this trade", ephemeral=True, mention_author=True)
+            await message.delete()
 
     await client.process_commands(message)
+
+
+def user_has_pokemon(user_id, pokemon_ids):
+    return player_collection().find_one(
+        {"discord_id": int(user_id),
+         "owned_pokemon": {"$in": [int(id) for id in pokemon_ids]}})
+
 
 
 def wtf(item):
