@@ -123,27 +123,30 @@ async def give(ctx, user: discord.Member, pokemon: str):
 
 @client.command(aliases=["trade"])
 async def trade_command(ctx, user: discord.Member, *message):
-    trade = {
-        'guildId': ctx.guild.id,
-        'messageId': ctx.message.id,
-        'offers': {
-            str(ctx.author.id): message,
-            str(user.id): [],
-        },
-        'closed': False
-    }
-    embed = await trade_embed(trade)
-    response = await ctx.send(embed=embed, components=[[
-        Button(label="Accept" ,
-               custom_id="confirm_trade",
-               style=ButtonStyle.green),
-        Button(label="Reject" ,
-               custom_id="reject_trade",
-               style=ButtonStyle.red)
-    ]])
-    trade['messageId'] = response.id
-    save_trade(response.id, trade)
-    await ctx.message.delete()
+    if user_has_pokemon(ctx.author.id, message):
+        trade = {
+            'guildId': ctx.guild.id,
+            'messageId': ctx.message.id,
+            'offers': {
+                str(ctx.author.id):  [int(id) for id in message],
+                str(user.id): [],
+            },
+            'closed': False
+        }
+        embed = await trade_embed(trade)
+        response = await ctx.send(embed=embed, components=[[
+            Button(label="Accept" ,
+                   custom_id="confirm_trade",
+                   style=ButtonStyle.green),
+            Button(label="Reject" ,
+                   custom_id="reject_trade",
+                   style=ButtonStyle.red)
+        ]])
+        trade['messageId'] = response.id
+        save_trade(response.id, trade)
+        await ctx.message.delete()
+    else:
+        await ctx.send("you don't have this pokemon :cry:", ephemeral=True, mention_author=True)
 
 
 async def trade_embed(trade):
@@ -319,8 +322,8 @@ async def guess(ctx):
 
 @client.command(name='ig')
 async def id_guesser(ctx):
-    # pokemon_id = random.randint(1, 2)
-    pokemon_id = random.randint(1, 100)
+    pokemon_id = random.randint(1, 2)
+    # pokemon_id = random.randint(1, 100)
     response = requests.get(f'https://pokeapi.co/api/v2/pokemon/{pokemon_id}')
     pokemon_data = response.json()
     pokemon_name = pokemon_data['name']
@@ -338,13 +341,21 @@ async def id_guesser(ctx):
     if int(guess.content) == pokemon_id:
         await ctx.send('You are right!')
 
-        await ctx.send('You will get a reward, the reward will be a pokemon 🛠️we working on it🛠️')
+        # Load the data from the JSON file
+        data = load_data()
+        user_id = str(ctx.author.id)
+        earnings = 100  # set the amount of poko the player earns for a correct guess
+        if user_id in data:
+            data[user_id] += earnings  # add the earned poko to the player's current poko
+        else:
+            data[user_id] = earnings  # set initial poko to the earned amount if the user is not in the data
+        # Save the updated data back to the JSON file
+        save_data(data)
 
+        await ctx.send(f'You earned {earnings} poko as a reward!')
 
     else:
         await ctx.send(f'Oops. It was actually {pokemon_id}.')
-
-
 
     # discord.Embed(title=data["name"].capitalize(),
     #               url="https://assets.pokemon.com/assets/cms2/img/pokedex/full/001.png",
@@ -403,24 +414,64 @@ async def register_emojis(ctx):
                 }
                 collection.update_one({"pokemon_id": id}, {"$set": data}, upsert=True)
 
+# herni mena
+def save_data(data):
+    with open('currency.json', 'w') as f:
+        json.dump(data, f)
 
+def load_data():
+    if not os.path.isfile('currency.json'):  # check if file does not exist
+        save_data({})  # create an empty JSON file
+    with open('currency.json') as f:
+        return json.load(f)
+
+@client.command(name='poco')
+async def poco(ctx, member: discord.Member = None):
+    if member is None:
+        await ctx.send('You did not mention a user.')
+        return
+    data = load_data()
+    user_id = str(member.id)
+    if user_id in data:
+        await ctx.send(f'{member.display_name} has {data[user_id]} poko.')
+    else:
+        await ctx.send(f'{member.display_name} has no poko.')
+
+@client.command(name='earn')
+async def earn(ctx):
+    data = load_data()
+    user_id = str(ctx.author.id)
+    if user_id in data:
+        data[user_id] += 100  # user earns 100 poko
+    else:
+        data[user_id] = 100  # set initial poko to 100 if the user is not in the data
+    save_data(data)  # save the updated data back to the JSON file
+    await ctx.send(f'{ctx.author.name} earned 100 poko.')
 @client.event
 async def on_message(message):
-    if message.reference is not None:
+    if message.reference is not None and client.user.id != message.author.id:
         trade = get_trade(message.reference.message_id)
         if trade:
             if str(message.author.id) in trade['offers']:
-                pokemon_ids = message.content.split()
-                if user_has_pokemon(message.author.id, pokemon_ids):
-                    for pokemon_id in pokemon_ids:
-                        trade['offers'][str(message.author.id)].append(pokemon_id)
-                    save_trade(message.reference.message_id, trade)
-                    embed = await trade_embed(trade)
-                    channel = await client.fetch_channel(message.reference.channel_id)
-                    trade_message = await channel.fetch_message(message.reference.message_id)
-                    await trade_message.edit(embed=embed)
-                else:
-                    await message.reply("you don't have this pokemon :cry:", ephemeral=True, mention_author=True)
+                pokemon_ids = [int(id) for id in message.content.split()]
+                for pokemon_id in pokemon_ids:
+                    if pokemon_id >0:
+                        if user_has_pokemon(message.author.id, pokemon_ids):
+                            # pokud je cislo kladne pridej pokemona do tradu
+                            trade['offers'][str(message.author.id)].append(pokemon_id)
+                        else:
+                            await message.reply("you don't have this pokemon :cry:", ephemeral=True, mention_author=True)
+                            return
+                    else:
+                        # pokud je cislo zaporne odeber pokemona z tradu
+                        # dostane: -1 => odeber:-(-1) = 1
+                        trade['offers'][str(message.author.id)].remove(-pokemon_id)
+                save_trade(message.reference.message_id, trade)
+                embed = await trade_embed(trade)
+                channel = await client.fetch_channel(message.reference.channel_id)
+                trade_message = await channel.fetch_message(message.reference.message_id)
+                await trade_message.edit(embed=embed)
+
             else:
                 await message.reply("you aren't a part of this trade", ephemeral=True, mention_author=True)
             await message.delete()
