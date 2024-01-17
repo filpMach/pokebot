@@ -14,6 +14,18 @@ from datetime import datetime
 import time
 from discord import Button, ButtonStyle
 
+POKEBALL_EMOJI_ID = 1118548894419275977
+GREATBALL_EMOJI_ID = 1196836002153635991
+ULTRABALL_EMOJI_ID = 1196836307872268328
+
+POKEBALL_CAPTURE_RATE = {
+    "pokeball":255,
+    "greatball":200,
+    "ultraball":115
+}
+
+
+
 token = os.environ['TOKEN']
 db_user = os.environ['MONGO_USER']
 db_password = os.environ['MONGO_PASS']
@@ -92,7 +104,7 @@ async def on_button_click(interaction, button):
             capture_rate, attempts, id = encounters[message]
             if user not in attempts:
                 attempts.add(user)
-                roll = random.randint(0, 255)
+                roll = random.randint(0, POKEBALL_CAPTURE_RATE[button.custom_id])
                 if roll < capture_rate:
 
                     await interaction.respond(f"{user.name} caught pokemon")
@@ -104,17 +116,17 @@ async def on_button_click(interaction, button):
                     await interaction.respond(f"you are so unlucky {roll}", delete_after=10, hidden=True)
 
             else:
-                await interaction.respond("you already tried to catch this pokemon",  delete_after=10, hidden=True)
+                await interaction.respond("you already tried to catch this pokemon", delete_after=10, hidden=True)
 
         else:
-           await interaction.respond(":turtle: too late, be quicker next time :turtle:",  delete_after=10, hidden=True)
+            await interaction.respond(":turtle: too late, be quicker next time :turtle:", delete_after=10, hidden=True)
 
 
 @client.command()
 async def give(ctx, user: discord.Member, pokemon: str):
     if pokemon.isnumeric():
         id = int(pokemon)
-        if player_collection().find_one({"discord_id": user.id})['owned_pokemon'].count(id) > 0:
+        if get_user(user.id)['owned_pokemon'].count(id) > 0:
             await ctx.send(f"{user.name} already has this pokemon")
         else:
             player_collection().update_one({"discord_id": user.id}, {"$push": {"owned_pokemon": id}})
@@ -128,17 +140,17 @@ async def trade_command(ctx, user: discord.Member, *message):
             'guildId': ctx.guild.id,
             'messageId': ctx.message.id,
             'offers': {
-                str(ctx.author.id):  [int(id) for id in message],
+                str(ctx.author.id): [int(id) for id in message],
                 str(user.id): [],
             },
             'closed': False
         }
         embed = await trade_embed(trade)
         response = await ctx.send(embed=embed, components=[[
-            Button(label="Accept" ,
+            Button(label="Accept",
                    custom_id="confirm_trade",
                    style=ButtonStyle.green),
-            Button(label="Reject" ,
+            Button(label="Reject",
                    custom_id="reject_trade",
                    style=ButtonStyle.red)
         ]])
@@ -194,9 +206,15 @@ async def encounter(ctx, message=""):
         time.sleep(2)
         # await message.edit(content=None, attachments=[file], embed=embed)
         await message.edit(content=None, embed=embed, components=[[
-            Button(emoji=client.get_emoji(1118548894419275977),
+            Button(emoji=client.get_emoji(POKEBALL_EMOJI_ID),
                    custom_id="pokeball",
-                   style=ButtonStyle.grey)
+                   style=ButtonStyle.grey),
+            Button(emoji=client.get_emoji(GREATBALL_EMOJI_ID),
+                   custom_id="greatball",
+                   style=ButtonStyle.red),
+            Button(emoji=client.get_emoji(ULTRABALL_EMOJI_ID),
+                   custom_id="ultraball",
+                   style=ButtonStyle.blurple),
         ]])
 
         encounters[message] = (capture_rate, set(), int(id))
@@ -274,11 +292,10 @@ async def pokemon(ctx, message=''):
 
 @client.command(aliases=['i'])
 async def inventory(ctx, message=''):
-    player = player_collection().find_one({"discord_id": ctx.author.id})
+    player = get_user(ctx.author.id)
     result = list()
     for id in sorted(player["owned_pokemon"]):
         result.append(f'`{str(id).rjust(4)}` {get_emoji(id)} {get_pokemon(id)["name"].title()}')
-
     if player:
         await ctx.reply("\n".join(result))
 
@@ -303,8 +320,10 @@ def player_collection():
 def get_emoji(id):
     emoji = db.get_collection("emojis").find_one({"pokemon_id": int(id)})
     return emoji["emoji"] if emoji else ":interrobang:"
+
+
 # minihry
-@client.command(name="guess", aliases =["g"])
+@client.command(name="guess", aliases=["g"])
 async def guess(ctx):
     number = random.randint(1, 10)
     await ctx.send("Guess a number between 1 and 10.")
@@ -320,9 +339,10 @@ async def guess(ctx):
     else:
         await ctx.send(f"Wrong guess! The correct number was {number}.")
 
+
 @client.command(name='ig')
 async def id_guesser(ctx):
-    pokemon_id = random.randint(1, 2)
+    pokemon_id = random.randint(1, 10)
     # pokemon_id = random.randint(1, 100)
     response = requests.get(f'https://pokeapi.co/api/v2/pokemon/{pokemon_id}')
     pokemon_data = response.json()
@@ -336,7 +356,7 @@ async def id_guesser(ctx):
     def check(m):
         return m.author == ctx.author and m.content.isdigit()
 
-    await ctx.send('Guess the Pokemon ID from 1 to 100:')
+    await ctx.send('Guess the Pokemon ID from 1 to 10:')
     guess = await client.wait_for('message', check=check)
     if int(guess.content) == pokemon_id:
         await ctx.send('You are right!')
@@ -344,15 +364,15 @@ async def id_guesser(ctx):
         # Load the data from the JSON file
         data = load_data()
         user_id = str(ctx.author.id)
-        earnings = 100  # set the amount of poko the player earns for a correct guess
+        earnings = 100  # set the amount of poco the player earns for a correct guess
         if user_id in data:
-            data[user_id] += earnings  # add the earned poko to the player's current poko
+            data[user_id] += earnings  # add the earned poco to the player's current poco
         else:
-            data[user_id] = earnings  # set initial poko to the earned amount if the user is not in the data
+            data[user_id] = earnings  # set initial poco to the earned amount if the user is not in the data
         # Save the updated data back to the JSON file
         save_data(data)
 
-        await ctx.send(f'You earned {earnings} poko as a reward!')
+        await ctx.send(f'You earned {earnings} poco as a reward!')
 
     else:
         await ctx.send(f'Oops. It was actually {pokemon_id}.')
@@ -414,10 +434,12 @@ async def register_emojis(ctx):
                 }
                 collection.update_one({"pokemon_id": id}, {"$set": data}, upsert=True)
 
+
 # herni mena
 def save_data(data):
     with open('currency.json', 'w') as f:
         json.dump(data, f)
+
 
 def load_data():
     if not os.path.isfile('currency.json'):  # check if file does not exist
@@ -425,28 +447,63 @@ def load_data():
     with open('currency.json') as f:
         return json.load(f)
 
+
 @client.command(name='poco')
 async def poco(ctx, member: discord.Member = None):
     if member is None:
         await ctx.send('You did not mention a user.')
         return
-    data = load_data()
-    user_id = str(member.id)
-    if user_id in data:
-        await ctx.send(f'{member.display_name} has {data[user_id]} poko.')
-    else:
-        await ctx.send(f'{member.display_name} has no poko.')
+    member_id = member.id
+    poco_value = get_user(member_id).get('poco')
+    await ctx.send(f'{member.display_name} has {poco_value} poco.')
+
+
+def get_user(member_id):
+    return player_collection().find_one({"discord_id": int(member_id)})
+
 
 @client.command(name='earn')
 async def earn(ctx):
-    data = load_data()
-    user_id = str(ctx.author.id)
-    if user_id in data:
-        data[user_id] += 100  # user earns 100 poko
+    amount = 20
+    player_collection().update_one({"discord_id": ctx.author.id}, {"$inc": {"poco": amount}})
+    await ctx.send(f'{ctx.author.name} earned {amount} poco.')
+
+# shop ----------------------------------------------------------------
+@client.command(name='shop')
+async def shop(ctx):
+    # Display the items available for purchase
+    embed = discord.Embed(title="PokeShop", description="Welcome to the PokeShop! Here's what we have for sale:")
+    embed.add_field(name=f"<:pokeball:{POKEBALL_EMOJI_ID}> Pokeball", value="10 Poco", inline=True)
+    embed.add_field(name=f"<:greatball:{GREATBALL_EMOJI_ID}>Great Ball", value="20 Poco", inline=True)
+    embed.add_field(name=f"<:ultraball:{ULTRABALL_EMOJI_ID}>Ultra Ball", value="50 Poco", inline=True)
+    await ctx.send(embed=embed)
+
+@client.command(name='buy')
+async def buy(ctx, item: str, quantity: int = 1):
+    if quantity <= 0:
+        await ctx.send("itz not available :cry:")
+        return
+    # Check if the user has enough currency
+    user_data = get_user(ctx.author.id)
+    if user_data:
+        price_list = {'pokeball': 10, 'greatball': 20, 'ultraball': 50}
+        if item.lower() in price_list:
+            total_cost = price_list[item.lower()] * quantity
+            if user_data.get('poco', 0) >= total_cost:
+                # Deduct the cost and add the items to the user's inventory
+                player_collection().update_one({"discord_id": ctx.author.id}, {"$inc": {"poco": -total_cost}})
+                for _ in range(quantity):
+                    player_collection().update_one({"discord_id": ctx.author.id},
+                                                   {"$inc": {f"owned_pokeball.{item.lower()}": 1}})
+                await ctx.send(f'You have successfully bought {quantity} {item}{"s" if quantity > 1 else""} for {total_cost} Poco.')
+            else:
+                await ctx.send("You don't have enough Poco to make this purchase.")
+        else:
+            await ctx.send("This item is not available in the shop.")
     else:
-        data[user_id] = 100  # set initial poko to 100 if the user is not in the data
-    save_data(data)  # save the updated data back to the JSON file
-    await ctx.send(f'{ctx.author.name} earned 100 poko.')
+        await ctx.send("You need to register first using the `register` command.")
+
+# shop -------------------------------------------------------------------
 @client.event
 async def on_message(message):
     if message.reference is not None and client.user.id != message.author.id:
@@ -455,12 +512,13 @@ async def on_message(message):
             if str(message.author.id) in trade['offers']:
                 pokemon_ids = [int(id) for id in message.content.split()]
                 for pokemon_id in pokemon_ids:
-                    if pokemon_id >0:
+                    if pokemon_id > 0:
                         if user_has_pokemon(message.author.id, pokemon_ids):
                             # pokud je cislo kladne pridej pokemona do tradu
                             trade['offers'][str(message.author.id)].append(pokemon_id)
                         else:
-                            await message.reply("you don't have this pokemon :cry:", ephemeral=True, mention_author=True)
+                            await message.reply("you don't have this pokemon :cry:", ephemeral=True,
+                                                mention_author=True)
                             return
                     else:
                         # pokud je cislo zaporne odeber pokemona z tradu
@@ -483,7 +541,6 @@ def user_has_pokemon(user_id, pokemon_ids):
     return player_collection().find_one(
         {"discord_id": int(user_id),
          "owned_pokemon": {"$in": [int(id) for id in pokemon_ids]}})
-
 
 
 def wtf(item):
