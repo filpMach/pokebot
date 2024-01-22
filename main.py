@@ -294,8 +294,15 @@ async def pokemon(ctx, message=''):
 async def inventory(ctx, message=''):
     player = get_user(ctx.author.id)
     result = list()
-    for id in sorted(player["owned_pokemon"]):
+    for id in sorted(player["owned_pokemon"] ):
         result.append(f'`{str(id).rjust(4)}` {get_emoji(id)} {get_pokemon(id)["name"].title()}')
+    result.append(" ")
+    owned_pokeball_ = player.get("owned_pokeball")
+    if owned_pokeball_ :
+        result.append(f'`{str(owned_pokeball_.get("pokeball")or 0).rjust(4)}` <:pokeball:{POKEBALL_EMOJI_ID}> Pokeball')
+        result.append(f'`{str(owned_pokeball_.get("greatball")or 0).rjust(4)}` <:greatball:{GREATBALL_EMOJI_ID}> Greatball')
+        result.append(f'`{str(owned_pokeball_.get("ultraball")or 0).rjust(4)}` <:ultraball:{ULTRABALL_EMOJI_ID}> Ultraball')
+
     if player:
         await ctx.reply("\n".join(result))
 
@@ -456,6 +463,8 @@ async def poco(ctx, member: discord.Member = None):
     member_id = member.id
     poco_value = get_user(member_id).get('poco')
     await ctx.send(f'{member.display_name} has {poco_value} poco.')
+    # else:
+    #     await ctx.send(f'{user.display_name} has {poco_value} poco.')
 
 
 def get_user(member_id):
